@@ -5,5 +5,6 @@ ipcRenderer.on('app-audio', (_e, chunk) => { if (handler) handler(chunk); });
 contextBridge.exposeInMainWorld('hstleApp', {
   appAudioActive: () => ipcRenderer.invoke('app-audio:active'),
   stopAppAudio: () => ipcRenderer.invoke('app-audio:stop'),
+  shareError: () => ipcRenderer.invoke('share:error'),
   onAppAudio: (cb) => { handler = typeof cb === 'function' ? cb : null; },
 });

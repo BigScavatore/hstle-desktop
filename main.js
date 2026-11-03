@@ -35,6 +35,7 @@ let pickerDone = null;
 let pickerApps = new Map();
 let pickerPids = new Map();   // id sorgente -> pid del programma che possiede la finestra
 let capturePid = null;
+let shareError = '';      // perché l'ultima condivisione dello schermo non è partita (vuoto = annullata dalla persona)
 
 const cfgFile = () => path.join(app.getPath('userData'), 'config.json');
 function cleanUrl(s) {
@@ -75,7 +76,7 @@ function createWindow() {
     width: 1280, height: 800, minWidth: 380, minHeight: 500,
     backgroundColor: '#08050f', title: 'Hstle', autoHideMenuBar: true,
     icon: path.join(__dirname, 'icon.png'),
-    webPreferences: { preload: path.join(__dirname, 'preload-app.js'), backgroundThrottling: false, contextIsolation: true, sandbox: true, nodeIntegration: false },
+    webPreferences: { preload: path.join(__dirname, 'preload-app.js'), backgroundThrottling: false, contextIsolation: true, sandbox: true, nodeIntegration: false, autoplayPolicy: 'no-user-gesture-required' },
   });
   const url = serverUrl();
   win.loadURL(url);
@@ -103,20 +104,29 @@ function setupPermissions() {
 
   // Condivisione schermo: finestra di scelta nostra, e audio del computer (solo Windows).
   ses.setDisplayMediaRequestHandler(async (request, callback) => {
+    shareError = '';
     if (!isOurs(request.frame ? request.frame.url : '')) return callback({});
     if (IS_WAYLAND) {            // Wayland: sceglie il portale di sistema (una sola finestra di scelta, senza audio)
       try {
-        const got = await desktopCapturer.getSources({ types: ['screen', 'window'] });
-        return callback(got.length ? { video: got[0] } : {});
-      } catch (e) { console.warn('condivisione Wayland:', e.message); return callback({}); }
+        // niente anteprime: su Wayland ogni anteprima aprirebbe un flusso PipeWire in più
+        const got = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 0, height: 0 }, fetchWindowIcons: false });
+        console.log('[hstle] Wayland: sorgenti dal portale:', got.map((s) => s.id + ' ' + s.name));
+        if (!got.length) return callback({});     // il portale è stato chiuso senza scegliere
+        return callback({ video: got[0] });
+      } catch (e) {
+        console.warn('condivisione Wayland:', e.message);
+        shareError = 'il portale di sistema non ha dato lo schermo (' + e.message + '). Servono PipeWire e xdg-desktop-portal con il backend del tuo desktop (gnome, kde, wlr).';
+        return callback({});
+      }
     }
     const choice = await openPicker();
     if (!choice) return callback({});
     let sources = [];
     try { sources = await desktopCapturer.getSources({ types: ['screen', 'window'] }); }
-    catch (e) { console.warn('elenco schermi:', e.message); return callback({}); }
+    catch (e) { console.warn('elenco schermi:', e.message); shareError = 'non riesco a elencare gli schermi (' + e.message + ').'; return callback({}); }
     const video = sources.find((s) => s.id === choice.id);
-    if (!video) return callback({});
+    if (!video) { shareError = 'la sorgente scelta non esiste più: riprova.'; console.warn('[hstle] sorgente non trovata:', choice.id, sources.map((s) => s.id)); return callback({}); }
+    console.log('[hstle] condivido', video.id, '| audio:', choice.audio);
     const res = { video };
     stopAppCapture();
     if (choice.audio === 'system' && ['win32', 'linux', 'darwin'].includes(process.platform)) res.audio = 'loopback';   // su Linux e macOS è sperimentale
@@ -200,6 +210,7 @@ function stopAppCapture() {
 const fromMainWindow = (e) => win && e.sender === win.webContents && isOurs(e.senderFrame ? e.senderFrame.url : '');
 ipcMain.handle('app-audio:active', (e) => fromMainWindow(e) && !!capturePid);
 ipcMain.handle('app-audio:stop', (e) => { if (fromMainWindow(e)) stopAppCapture(); });
+ipcMain.handle('share:error', (e) => { if (!fromMainWindow(e)) return ''; const s = shareError; shareError = ''; return s; });
 app.on('before-quit', stopAppCapture);
 
 /* ---------- cambiare server ---------- */

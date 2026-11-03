@@ -21,10 +21,18 @@ Non sai quale Mac hai? Menu Apple → *Informazioni su questo Mac*: "Chip Apple 
 ## Cosa cambia da un sistema all'altro
 
 - **Windows**: tutto, compreso l'audio di sistema e quello di un solo programma (anche con lo schermo intero).
+- **Linux, Wayland**: lo schermo lo sceglie il portale di sistema (una sola finestra di scelta, quella di GNOME/KDE), senza audio. Servono PipeWire e `xdg-desktop-portal`.
+- **Linux, X11**: selettore di Hstle (schermi e finestre).
 - **macOS e Linux**: schermo e finestre con il selettore di Hstle, e "Tutto l'audio del computer" in modo **sperimentale** (non ancora provato su macchine vere): su Linux serve PulseAudio o PipeWire (con `pipewire-pulse`), su macOS serve la 13 o più recente e il permesso di registrazione dello schermo/audio. Include anche le voci della chiamata: meglio con le cuffie. L'audio di un solo programma resta solo per Windows. Se non senti l'audio, scegli "Nessun audio" e condividi solo il video.
 
 Per condividere un gioco con l'audio, su Windows scegli lo **schermo intero** e, nel menu *Audio*, "Solo l'audio di: *nome del gioco*": così la chiamata non si risente. Usa il pacchetto
 [`application-loopback`](https://github.com/WerdoxDev/application-loopback) (due piccoli programmi Windows, a cura del suo autore).
+
+## Se su Linux la condivisione non parte
+
+Avvia l'app da un terminale (`./Hstle-*.AppImage` oppure `npm start`) e guarda gli errori che stampa. Scrivi anche:
+la distribuzione, se usi X11 o Wayland (`echo $XDG_SESSION_TYPE`) e se hai PipeWire (`pactl info | grep Server`).
+Prova a scegliere **Nessun audio** nel selettore: l'audio di sistema è sperimentale.
 
 ## Crearla da solo
 

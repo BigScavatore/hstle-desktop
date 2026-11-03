@@ -1,4 +1,4 @@
-// Hstle per Windows: apre il client web del tuo server in una finestra Chromium.
+// Hstle desktop (Windows, macOS, Linux): apre il client web del tuo server in una finestra Chromium.
 // Serve soprattutto a poter condividere lo schermo CON l'audio del computer, cosa che Firefox non permette.
 const { app, BrowserWindow, Menu, session, desktopCapturer, ipcMain, shell } = require('electron');
 const fs = require('fs');
@@ -10,6 +10,13 @@ app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
+// Linux: sotto Wayland lo schermo si cattura solo tramite PipeWire e il portale di sistema; senza questi
+// interruttori Electron gira in XWayland e la condivisione resta nera o non parte.
+const IS_WAYLAND = process.platform === 'linux' && (process.env.XDG_SESSION_TYPE === 'wayland' || !!process.env.WAYLAND_DISPLAY);
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer');
+  if (IS_WAYLAND) app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
+}
 
 /* Audio di una sola app (solo Windows): il pacchetto application-loopback lancia due piccoli programmi
    (ProcessList.exe e ApplicationLoopback.exe) che leggono l'audio del processo scelto. Se manca, resta
@@ -97,9 +104,17 @@ function setupPermissions() {
   // Condivisione schermo: finestra di scelta nostra, e audio del computer (solo Windows).
   ses.setDisplayMediaRequestHandler(async (request, callback) => {
     if (!isOurs(request.frame ? request.frame.url : '')) return callback({});
+    if (IS_WAYLAND) {            // Wayland: sceglie il portale di sistema (una sola finestra di scelta, senza audio)
+      try {
+        const got = await desktopCapturer.getSources({ types: ['screen', 'window'] });
+        return callback(got.length ? { video: got[0] } : {});
+      } catch (e) { console.warn('condivisione Wayland:', e.message); return callback({}); }
+    }
     const choice = await openPicker();
     if (!choice) return callback({});
-    const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] });
+    let sources = [];
+    try { sources = await desktopCapturer.getSources({ types: ['screen', 'window'] }); }
+    catch (e) { console.warn('elenco schermi:', e.message); return callback({}); }
     const video = sources.find((s) => s.id === choice.id);
     if (!video) return callback({});
     const res = { video };

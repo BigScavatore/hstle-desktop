@@ -21,7 +21,7 @@ Non sai quale Mac hai? Menu Apple → *Informazioni su questo Mac*: "Chip Apple 
 ## Cosa cambia da un sistema all'altro
 
 - **Windows**: tutto, compreso l'audio di sistema e quello di un solo programma (anche con lo schermo intero).
-- **macOS e Linux**: schermo e finestre con il selettore di Hstle; l'audio del computer non viene catturato, quindi il video si condivide senza audio. L'audio di un solo programma è solo per Windows.
+- **macOS e Linux**: schermo e finestre con il selettore di Hstle, e "Tutto l'audio del computer" in modo **sperimentale** (non ancora provato su macchine vere): su Linux serve PulseAudio o PipeWire (con `pipewire-pulse`), su macOS serve la 13 o più recente e il permesso di registrazione dello schermo/audio. Include anche le voci della chiamata: meglio con le cuffie. L'audio di un solo programma resta solo per Windows. Se non senti l'audio, scegli "Nessun audio" e condividi solo il video.
 
 Per condividere un gioco con l'audio, su Windows scegli lo **schermo intero** e, nel menu *Audio*, "Solo l'audio di: *nome del gioco*": così la chiamata non si risente. Usa il pacchetto
 [`application-loopback`](https://github.com/WerdoxDev/application-loopback) (due piccoli programmi Windows, a cura del suo autore).

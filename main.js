@@ -104,7 +104,7 @@ function setupPermissions() {
     if (!video) return callback({});
     const res = { video };
     stopAppCapture();
-    if (choice.audio === 'system' && process.platform === 'win32') res.audio = 'loopback';
+    if (choice.audio === 'system' && ['win32', 'linux', 'darwin'].includes(process.platform)) res.audio = 'loopback';   // su Linux e macOS è sperimentale
     else if (choice.audio === 'app') startAppCapture(choice.pid || pickerPids.get(choice.id));   // l'audio arriva alla pagina da un altro percorso
     callback(res);
   }, { useSystemPicker: false });
@@ -156,7 +156,7 @@ ipcMain.handle('picker:sources', async (e) => {
   }
   return { sources: out, apps: [...pickerApps].map(([pid, title]) => ({ pid, title })) };
 });
-ipcMain.handle('picker:audio', () => process.platform === 'win32');
+ipcMain.handle('picker:audio', () => ['win32', 'linux', 'darwin'].includes(process.platform));
 ipcMain.on('picker:choose', (e, choice) => {
   if (!picker || e.sender !== picker.webContents) return;
   const done = pickerDone;

@@ -29,6 +29,15 @@ if (process.platform === 'win32') {
   } catch (e) { console.warn('audio per app non disponibile:', e.message); loopback = null; }
 }
 
+/* Cattura dell'audio per processo su tutti i sistemi: electron-native-screenshare (WASAPI su Windows,
+   ScreenCaptureKit su macOS, PipeWire/PulseAudio su Linux). È opzionale: se non si carica, restano
+   application-loopback (Windows) e l'audio di sistema di Chromium. */
+let ens = null;
+try {
+  const mod = require('electron-native-screenshare');
+  if (mod.isAvailable()) ens = mod; else console.warn('audio nativo non disponibile:', mod.getLoadError());
+} catch (e) { console.warn('audio nativo non installato:', e.message); }
+
 const DEFAULT_URL = 'https://giuseppefausto.ddns.net:8444';
 let win = null, picker = null, serverWin = null;
 let pickerDone = null;
@@ -130,7 +139,8 @@ function setupPermissions() {
     const res = { video };
     stopAppCapture();
     if (choice.audio === 'system' && ['win32', 'linux', 'darwin'].includes(process.platform)) res.audio = 'loopback';   // su Linux e macOS è sperimentale
-    else if (choice.audio === 'app') startAppCapture(choice.pid || pickerPids.get(choice.id));   // l'audio arriva alla pagina da un altro percorso
+    else if (choice.audio === 'app') startAppCapture(choice.pid || pickerPids.get(choice.id), true);   // l'audio arriva alla pagina da un altro percorso
+    else if (choice.audio === 'except' && ens) startAppCapture(process.pid, false);                    // tutto l'audio tranne quello di Hstle
     callback(res);
   }, { useSystemPicker: false });
 }
@@ -168,7 +178,11 @@ ipcMain.handle('picker:sources', async (e) => {
   const out = [];
   for (const s of list) {
     const screen = s.id.startsWith('screen:');
-    const pid = !screen && wins.length ? await pidForWindow(s, wins) : null;
+    let pid = !screen && wins.length ? await pidForWindow(s, wins) : null;
+    if (!pid && !screen && ens) {                           // macOS e Linux (X11): il pacchetto nativo trova il programma dalla finestra
+      const h = /^window:(\d+):/.exec(s.id);
+      try { const p = h ? ens.getPidFromWindowHandle(Number(h[1])) : 0; if (p > 0) pid = String(p); } catch {}
+    }
     if (pid && Number(pid) !== process.pid) pickerPids.set(s.id, pid);
     out.push({ id: s.id, name: s.name, thumb: s.thumbnail.toDataURL(), screen, app: pickerPids.has(s.id) });
   }
@@ -181,31 +195,74 @@ ipcMain.handle('picker:sources', async (e) => {
   }
   return { sources: out, apps: [...pickerApps].map(([pid, title]) => ({ pid, title })) };
 });
-ipcMain.handle('picker:audio', () => ['win32', 'linux', 'darwin'].includes(process.platform));
+ipcMain.handle('picker:audio', () => ({
+  system: ['win32', 'linux', 'darwin'].includes(process.platform),
+  except: !!ens && process.platform !== 'linux',   // su Linux "tutto tranne Hstle" non è possibile: include anche la chiamata
+  app: !!ens || !!loopback,
+}));
 ipcMain.on('picker:choose', (e, choice) => {
   if (!picker || e.sender !== picker.webContents) return;
   const done = pickerDone;
   pickerDone = null;
   if (done) done(choice && typeof choice.id === 'string' ? {
     id: choice.id,
-    audio: ['app', 'system', 'none'].includes(choice.audio) ? choice.audio : 'none',
+    audio: ['app', 'except', 'system', 'none'].includes(choice.audio) ? choice.audio : 'none',
     pid: typeof choice.pid === 'string' && pickerApps.has(choice.pid) ? choice.pid : null,   // solo programmi dell'elenco mostrato
   } : null);
   picker.close();
 });
 
 /* ---------- audio di una sola app: dal programma alla pagina ---------- */
-function startAppCapture(pid) {
-  if (!loopback || !pid) return false;
-  try {
-    loopback.startAudioCapture(pid, { onData: (chunk) => { if (win && !win.isDestroyed()) win.webContents.send('app-audio', chunk); } });
-    capturePid = pid;
-    return true;
-  } catch (e) { console.warn('cattura audio:', e.message); capturePid = null; return false; }
+/** Porta l'audio ricevuto (float32 o 16 bit, qualsiasi frequenza) a 16 bit stereo a 48 kHz, il formato che la pagina si aspetta. */
+function toS16Stereo48(data, meta) {
+  const ch = Math.max(1, meta && meta.channels || 2), sr = (meta && meta.sampleRate) || 48000;
+  const bits = (meta && meta.bitsPerSample) || 16, isFloat = !!(meta && meta.isFloat);
+  if (!isFloat && bits === 16 && ch === 2 && sr === 48000) return data;
+  const ab = new ArrayBuffer(data.length - (data.length % (bits / 8 * ch)));
+  new Uint8Array(ab).set(data.subarray(0, ab.byteLength));       // copia allineata
+  const src = isFloat && bits === 32 ? new Float32Array(ab) : bits === 16 ? new Int16Array(ab) : null;
+  if (!src) return null;
+  const scale = isFloat ? 32767 : 1, frames = (src.length / ch) | 0;
+  const outFrames = sr === 48000 ? frames : Math.floor(frames * 48000 / sr);
+  const out = new Int16Array(outFrames * 2);
+  for (let i = 0; i < outFrames; i++) {
+    const pos = sr === 48000 ? i : i * sr / 48000, i0 = pos | 0, i1 = Math.min(frames - 1, i0 + 1), fr = pos - i0;
+    for (let c = 0; c < 2; c++) {
+      const k = Math.min(c, ch - 1);
+      const v = (src[i0 * ch + k] * (1 - fr) + src[i1 * ch + k] * fr) * scale;
+      out[i * 2 + c] = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
+    }
+  }
+  return Buffer.from(out.buffer);
+}
+let captureVia = null;
+const sendAudio = (chunk) => { if (chunk && win && !win.isDestroyed()) win.webContents.send('app-audio', chunk); };
+/** include = true: solo l'audio del programma `pid`; false: tutto tranne quello del programma `pid`. */
+function startAppCapture(pid, include = true) {
+  stopAppCapture();
+  if (!pid) return false;
+  if (ens) {
+    try {
+      ens.startCapture(Number(pid), include, (data, meta) => { try { sendAudio(toS16Stereo48(data, meta)); } catch {} });
+      capturePid = String(pid); captureVia = 'ens';
+      return true;
+    } catch (e) { console.warn('cattura audio nativa:', e.message); }
+  }
+  if (include && loopback) {                                           // ripiego su Windows
+    try {
+      loopback.startAudioCapture(pid, { onData: sendAudio });
+      capturePid = String(pid); captureVia = 'loopback';
+      return true;
+    } catch (e) { console.warn('cattura audio:', e.message); }
+  }
+  capturePid = null;
+  return false;
 }
 function stopAppCapture() {
-  if (loopback && capturePid) { try { loopback.stopAudioCapture(capturePid); } catch {} }
-  capturePid = null;
+  if (capturePid) {
+    try { if (captureVia === 'ens' && ens) ens.stopCapture(); else if (loopback) loopback.stopAudioCapture(capturePid); } catch {}
+  }
+  capturePid = null; captureVia = null;
 }
 const fromMainWindow = (e) => win && e.sender === win.webContents && isOurs(e.senderFrame ? e.senderFrame.url : '');
 ipcMain.handle('app-audio:active', (e) => fromMainWindow(e) && !!capturePid);

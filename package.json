@@ -43,7 +43,8 @@
       "output": "dist"
     },
     "asarUnpack": [
-      "node_modules/application-loopback/bin/**"
+      "node_modules/application-loopback/bin/**",
+      "node_modules/electron-native-screenshare/build/**"
     ],
     "artifactName": "Hstle-${version}-${os}-${arch}.${ext}",
     "mac": {
@@ -78,7 +79,8 @@
       "icon": "icon.png",
       "category": "Network",
       "maintainer": "BigScavatore"
-    }
+    },
+    "npmRebuild": false
   },
   "dependencies": {
     "application-loopback": "^1.2.7"
@@ -87,5 +89,8 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/BigScavatore/hstle-desktop.git"
+  },
+  "optionalDependencies": {
+    "electron-native-screenshare": "^1.2.0"
   }
 }

@@ -29,6 +29,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Librerie audio per Linux (cattura audio nativa)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y libpipewire-0.3-dev libpulse-dev libx11-dev libasound2-dev libjack-jackd2-dev
       - run: npm install
       - run: npm run ${{ matrix.script }}
         env:

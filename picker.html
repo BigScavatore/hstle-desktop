@@ -24,7 +24,7 @@
 </footer>
 <script>
 const WIN = /Windows/.test(navigator.userAgent);
-let sel = null, canAudio = false, apps = [], byId = new Map();
+let sel = null, canAudio = false, caps = { system: false, except: false, app: false }, apps = [], byId = new Map();
 const grid = document.getElementById('grid');
 function card(s) {
   const b = document.createElement('button'); b.className = 'card'; b.type = 'button';
@@ -39,13 +39,14 @@ function fillAudio(s) {
   const a = document.getElementById('audio');
   a.replaceChildren();
   const add = (v, t) => { const o = document.createElement('option'); o.value = v; o.textContent = t; a.append(o); };
-  if (canAudio) {
+  if (caps.except && s.screen) add('except', 'Tutto l\'audio del computer tranne Hstle (consigliato)');
+  if (caps.app) {
     if (s.app) add('app', 'Solo l\'audio di questa app');
     else if (s.screen) apps.forEach((x) => add('app:' + x.pid, 'Solo l\'audio di: ' + x.title));
-    add('system', 'Tutto l\'audio del computer (si sentirà anche la chiamata)' + (WIN ? '' : ' - sperimentale, può non partire'));
   }
+  if (caps.system) add('system', 'Tutto l\'audio del computer (si sentirà anche la chiamata)' + (WIN ? '' : ' - sperimentale, può non partire'));
   add('none', 'Nessun audio');
-  if (!WIN) a.value = 'none';        // su Linux e macOS l'audio di sistema è sperimentale: di default solo video
+  if (!WIN && !caps.except && !(caps.app && (s.app || apps.length))) a.value = 'none';   // audio di sistema sperimentale: di default solo video
 }
 function go() {
   if (!sel) return;
@@ -53,7 +54,7 @@ function go() {
   hstleDesktop.choose(v.startsWith('app:') ? { id: sel, audio: 'app', pid: v.slice(4) } : { id: sel, audio: v });
 }
 (async () => {
-  canAudio = await hstleDesktop.canShareAudio();
+  caps = await hstleDesktop.canShareAudio();
   fillAudio({ app: false });
   const r = await hstleDesktop.sources();
   const list = r.sources; apps = r.apps;

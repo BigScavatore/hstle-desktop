@@ -28,6 +28,21 @@ Non sai quale Mac hai? Menu Apple → *Informazioni su questo Mac*: "Chip Apple 
 Per condividere un gioco con l'audio, su Windows scegli lo **schermo intero** e, nel menu *Audio*, "Solo l'audio di: *nome del gioco*": così la chiamata non si risente. Usa il pacchetto
 [`application-loopback`](https://github.com/WerdoxDev/application-loopback) (due piccoli programmi Windows, a cura del suo autore).
 
+## Audio per programma (electron-native-screenshare)
+
+L'app usa [`electron-native-screenshare`](https://github.com/CilginSinek/electron-native-screenshare) (MIT) per catturare
+l'audio di un solo programma, o di tutto tranne Hstle, con le API del sistema (WASAPI su Windows, ScreenCaptureKit su macOS
+13+, PipeWire/PulseAudio su Linux). È un componente nativo **opzionale**: se non si installa o non si carica, l'app
+funziona lo stesso con `application-loopback` (Windows) e l'audio di sistema.
+
+| Voce del menu Audio | Windows | macOS | Linux |
+|---|---|---|---|
+| Tutto tranne Hstle (consigliato per i giochi) | sì | sì | no (non possibile: include la chiamata) |
+| Solo l'audio di un programma | sì | sì | sì (serve PipeWire) |
+| Tutto l'audio del computer | sì | sperimentale | sperimentale |
+
+Nel terminale, all'avvio, l'app stampa `audio nativo non disponibile` se il componente non si è caricato.
+
 ## Se su Linux la condivisione non parte
 
 Avvia l'app da un terminale (`./Hstle-*.AppImage` oppure `npm start`) e guarda gli errori che stampa. Scrivi anche:

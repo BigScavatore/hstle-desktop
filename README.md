@@ -21,9 +21,10 @@ Non sai quale Mac hai? Menu Apple → *Informazioni su questo Mac*: "Chip Apple 
 ## Cosa cambia da un sistema all'altro
 
 - **Windows**: tutto, compreso l'audio di sistema e quello di un solo programma (anche con lo schermo intero).
-- **Linux, Wayland**: lo schermo lo sceglie il portale di sistema (una sola finestra di scelta, quella di GNOME/KDE), senza audio. Servono PipeWire e `xdg-desktop-portal`.
+- **Linux, Wayland**: prima scegli l'audio in una piccola finestra di Hstle, poi lo schermo nel portale di sistema (quello di GNOME/KDE). Servono PipeWire e `xdg-desktop-portal` con il backend del tuo desktop.
 - **Linux, X11**: selettore di Hstle (schermi e finestre).
-- **macOS e Linux**: schermo e finestre con il selettore di Hstle, e "Tutto l'audio del computer" in modo **sperimentale** (non ancora provato su macchine vere): su Linux serve PulseAudio o PipeWire (con `pipewire-pulse`), su macOS serve la 13 o più recente e il permesso di registrazione dello schermo/audio. Include anche le voci della chiamata: meglio con le cuffie. L'audio di un solo programma resta solo per Windows. Se non senti l'audio, scegli "Nessun audio" e condividi solo il video.
+- **Linux, audio**: "Tutto l'audio del computer" funziona anche con lo **schermo intero** (provato con PulseAudio; con PipeWire serve `pipewire-pulse`). Include anche le voci della chiamata: meglio con le cuffie. Se l'audio non parte, l'app condivide comunque il video, senza riaprire la scelta.
+- **macOS**: "Tutto l'audio del computer" è **sperimentale** (serve la 13 o più recente e il permesso di registrazione dello schermo/audio).
 
 Per condividere un gioco con l'audio, su Windows scegli lo **schermo intero** e, nel menu *Audio*, "Solo l'audio di: *nome del gioco*": così la chiamata non si risente. Usa il pacchetto
 [`application-loopback`](https://github.com/WerdoxDev/application-loopback) (due piccoli programmi Windows, a cura del suo autore).

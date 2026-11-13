@@ -10,7 +10,7 @@
   img{width:100%;aspect-ratio:16/9;object-fit:contain;background:#000;border-radius:8px;display:block}
   .nm{margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   footer{display:flex;gap:12px;align-items:center;padding:12px 18px;border-top:1px solid #2b1f44}
-  label{flex:1;display:flex;gap:8px;align-items:center;color:#cfc7e6} select{background:#08050f;color:inherit;border:1px solid #2b1f44;border-radius:8px;padding:7px 10px;font:inherit;min-width:0;flex:1}
+  label{flex:1;min-width:0;display:flex;gap:8px;align-items:center;color:#cfc7e6} select{background:#08050f;color:inherit;border:1px solid #2b1f44;border-radius:8px;padding:7px 10px;font:inherit;min-width:0;flex:1}
   .btn{border:0;border-radius:10px;padding:9px 18px;font:inherit;font-weight:600;cursor:pointer;color:#fff;background:#8b5cf6} .btn.g{background:#231836} .btn:disabled{opacity:.45;cursor:default}
   h2{grid-column:1/-1;font-size:12px;color:#8d82aa;margin:8px 0 0}
 </style></head><body>
@@ -44,17 +44,28 @@ function fillAudio(s) {
     if (s.app) add('app', 'Solo l\'audio di questa app');
     else if (s.screen) apps.forEach((x) => add('app:' + x.pid, 'Solo l\'audio di: ' + x.title));
   }
-  if (caps.system) add('system', 'Tutto l\'audio del computer (si sentirà anche la chiamata)' + (WIN ? '' : ' - sperimentale, può non partire'));
+  if (caps.system) add('system', 'Tutto l\'audio del computer (si sentirà anche la chiamata: meglio con le cuffie)');
   add('none', 'Nessun audio');
-  if (!WIN && !caps.except && !(caps.app && (s.app || apps.length))) a.value = 'none';   // audio di sistema sperimentale: di default solo video
+  // fuori da Windows l'audio di sistema include la chiamata: di default solo video (se l'audio non parte, si condivide comunque il video)
+  if (!WIN && !caps.except && !(caps.app && (s.app || apps.length))) a.value = 'none';
 }
 function go() {
   if (!sel) return;
   const v = document.getElementById('audio').value;
   hstleDesktop.choose(v.startsWith('app:') ? { id: sel, audio: 'app', pid: v.slice(4) } : { id: sel, audio: v });
 }
+const AUDIO_ONLY = new URLSearchParams(location.search).get('only') === 'audio';
 (async () => {
   caps = await hstleDesktop.canShareAudio();
+  if (AUDIO_ONLY) {            // Wayland: qui solo l'audio, lo schermo lo scegli dopo nella finestra del sistema
+    document.querySelector('h1').textContent = 'Condividi lo schermo';
+    document.querySelector('.sub').textContent = 'Scegli l\'audio, poi premi Continua: lo schermo o la finestra li scegli nella finestra del sistema che si apre subito dopo.';
+    grid.remove();
+    sel = 'portal';
+    fillAudio({ screen: true, app: false });
+    const ok = document.getElementById('ok'); ok.textContent = 'Continua'; ok.disabled = false;
+    return;
+  }
   fillAudio({ app: false });
   const r = await hstleDesktop.sources();
   const list = r.sources; apps = r.apps;

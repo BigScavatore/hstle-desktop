@@ -44,9 +44,13 @@ function fillAudio(s) {
     if (s.app) add('app', 'Solo l\'audio di questa app');
     else if (s.screen) apps.forEach((x) => add('app:' + x.pid, 'Solo l\'audio di: ' + x.title));
   }
+  if (caps.linux) {              // Linux: due sole scelte; "tutto l'audio" non include la chiamata
+    if (caps.system) add('system', 'Tutto l\'audio');
+    add('none', 'Nessun audio');
+    return;
+  }
   if (caps.system) add('system', 'Tutto l\'audio del computer (si sentirà anche la chiamata: meglio con le cuffie)');
   add('none', 'Nessun audio');
-  // fuori da Windows l'audio di sistema include la chiamata: di default solo video (se l'audio non parte, si condivide comunque il video)
   if (!WIN && !caps.except && !(caps.app && (s.app || apps.length))) a.value = 'none';
 }
 function go() {

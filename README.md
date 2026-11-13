@@ -23,7 +23,7 @@ Non sai quale Mac hai? Menu Apple → *Informazioni su questo Mac*: "Chip Apple 
 - **Windows**: tutto, compreso l'audio di sistema e quello di un solo programma (anche con lo schermo intero).
 - **Linux, Wayland**: prima scegli l'audio in una piccola finestra di Hstle, poi lo schermo nel portale di sistema (quello di GNOME/KDE). Servono PipeWire e `xdg-desktop-portal` con il backend del tuo desktop.
 - **Linux, X11**: selettore di Hstle (schermi e finestre).
-- **Linux, audio**: "Tutto l'audio del computer" funziona anche con lo **schermo intero** (provato con PulseAudio; con PipeWire serve `pipewire-pulse`). Include anche le voci della chiamata: meglio con le cuffie. Se l'audio non parte, l'app condivide comunque il video, senza riaprire la scelta.
+- **Linux, audio**: due scelte, "Tutto l'audio" o "Nessun audio". "Tutto l'audio" funziona anche con lo **schermo intero** e **non include la chiamata**: durante la condivisione Hstle crea un'uscita virtuale (`hstle_share`) in cui finiscono gli altri programmi, la rimanda alle casse e condivide solo quella, mentre la chiamata va dritta alle casse. Alla fine rimette tutto com'era. Serve `pactl` (PulseAudio, o PipeWire con `pipewire-pulse`). Se l'audio non parte, l'app condivide comunque il video.
 - **macOS**: "Tutto l'audio del computer" è **sperimentale** (serve la 13 o più recente e il permesso di registrazione dello schermo/audio).
 
 Per condividere un gioco con l'audio, su Windows scegli lo **schermo intero** e, nel menu *Audio*, "Solo l'audio di: *nome del gioco*": così la chiamata non si risente. Usa il pacchetto
@@ -38,9 +38,9 @@ funziona lo stesso con `application-loopback` (Windows) e l'audio di sistema.
 
 | Voce del menu Audio | Windows | macOS | Linux |
 |---|---|---|---|
-| Tutto tranne Hstle (consigliato per i giochi) | sì | sì | no (non possibile: include la chiamata) |
-| Solo l'audio di un programma | sì | sì | sì (serve PipeWire) |
-| Tutto l'audio del computer | sì | sperimentale | sperimentale |
+| Tutto tranne Hstle (consigliato per i giochi) | sì | sì | sì (è "Tutto l'audio", con `pactl`) |
+| Solo l'audio di un programma | sì | sì | no |
+| Tutto l'audio del computer (con la chiamata) | sì | sperimentale | no |
 
 Nel terminale, all'avvio, l'app stampa `audio nativo non disponibile` se il componente non si è caricato.
 

@@ -37,6 +37,15 @@ try {
   if (mod.isAvailable()) ens = mod; else console.warn('audio nativo non disponibile:', mod.getLoadError());
 } catch (e) { console.warn('audio nativo non installato:', e.message); }
 
+/* Linux: "tutto l'audio" senza le voci della chiamata (vedi linux-audio.js). */
+const linuxAudio = process.platform === 'linux' ? require('./linux-audio') : null;
+const ownPids = () => [process.pid, ...app.getAppMetrics().map((m) => m.pid)];
+/** Su Linux prepara l'audio da condividere senza Hstle; se non ci riesce, niente audio (meglio che far sentire la chiamata). */
+async function linuxSystemAudio() {
+  try { await linuxAudio.start(ownPids); return true; }
+  catch (e) { console.warn('[hstle] audio Linux non disponibile:', e.message); return false; }
+}
+
 const DEFAULT_URL = 'https://giuseppefausto.ddns.net:8444';
 let win = null, picker = null, serverWin = null;
 let pickerDone = null;
@@ -119,6 +128,7 @@ function setupPermissions() {
     // Non riapriamo la finestra di scelta: riusiamo lo schermo scelto un attimo fa.
     const retry = !request.audioRequested && lastShare && Date.now() < lastShare.until ? lastShare : null;
     lastShare = null;
+    if (retry && linuxAudio) linuxAudio.stop();
     if (retry && retry.video) { console.log('[hstle] riprovo senza audio:', retry.video.id); return callback({ video: retry.video }); }
     if (IS_WAYLAND) {            // Wayland: l'audio lo scegliamo noi, lo schermo lo sceglie il portale di sistema
       let audio = 'none';
@@ -133,7 +143,7 @@ function setupPermissions() {
         console.log('[hstle] Wayland: sorgenti dal portale:', got.map((s) => s.id + ' ' + s.name), '| audio:', audio);
         if (!got.length) return callback({});     // il portale è stato chiuso senza scegliere
         const res = { video: got[0] };
-        if (audio === 'system' && request.audioRequested) {
+        if (audio === 'system' && request.audioRequested && await linuxSystemAudio()) {
           res.audio = 'loopback';
           lastShare = { until: Date.now() + 10000 };   // se l'audio fallisce si ripassa dal portale, senza audio
         }
@@ -154,7 +164,7 @@ function setupPermissions() {
     console.log('[hstle] condivido', video.id, '| audio:', choice.audio);
     const res = { video };
     stopAppCapture();
-    if (choice.audio === 'system' && request.audioRequested) {
+    if (choice.audio === 'system' && request.audioRequested && (!linuxAudio || await linuxSystemAudio())) {
       res.audio = 'loopback';
       lastShare = { video, until: Date.now() + 10000 };
     }
@@ -215,11 +225,9 @@ ipcMain.handle('picker:sources', async (e) => {
   }
   return { sources: out, apps: [...pickerApps].map(([pid, title]) => ({ pid, title })) };
 });
-ipcMain.handle('picker:audio', () => ({
-  system: ['win32', 'linux', 'darwin'].includes(process.platform),
-  except: !!ens && process.platform !== 'linux',   // su Linux "tutto tranne Hstle" non è possibile: include anche la chiamata
-  app: !!ens || !!loopback,
-}));
+ipcMain.handle('picker:audio', () => (linuxAudio
+  ? { linux: true, system: linuxAudio.available(), except: false, app: false }   // Linux: solo "tutto l'audio" (senza la chiamata) o niente
+  : { system: ['win32', 'darwin'].includes(process.platform), except: !!ens, app: !!ens || !!loopback }));
 ipcMain.on('picker:choose', (e, choice) => {
   if (!picker || e.sender !== picker.webContents) return;
   const done = pickerDone;
@@ -283,6 +291,7 @@ function stopAppCapture() {
     try { if (captureVia === 'ens' && ens) ens.stopCapture(); else if (loopback) loopback.stopAudioCapture(capturePid); } catch {}
   }
   capturePid = null; captureVia = null;
+  if (linuxAudio) linuxAudio.stop();
 }
 const fromMainWindow = (e) => win && e.sender === win.webContents && isOurs(e.senderFrame ? e.senderFrame.url : '');
 ipcMain.handle('app-audio:active', (e) => fromMainWindow(e) && !!capturePid);
@@ -318,6 +327,7 @@ if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
   app.whenReady().then(() => {
+    if (linuxAudio && linuxAudio.available()) linuxAudio.cleanupLeftovers();   // uscite virtuali rimaste da un crash
     setupPermissions();
     Menu.setApplicationMenu(Menu.buildFromTemplate([
       { label: 'Hstle', submenu: [

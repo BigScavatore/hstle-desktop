@@ -12,11 +12,10 @@ app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 // Linux: sotto Wayland lo schermo si cattura solo tramite PipeWire e il portale di sistema; senza questi
 // interruttori Electron gira in XWayland e la condivisione resta nera o non parte.
+// (--ozone-platform-hint invece non si può mettere da qui: Chromium lo legge prima che giri questo file, quindi
+// l'app gira in XWayland; va bene lo stesso, perché la cattura passa comunque da PipeWire e dal portale.)
 const IS_WAYLAND = process.platform === 'linux' && (process.env.XDG_SESSION_TYPE === 'wayland' || !!process.env.WAYLAND_DISPLAY);
-if (process.platform === 'linux') {
-  app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer');
-  if (IS_WAYLAND) app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
-}
+if (process.platform === 'linux') app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer');
 
 /* Audio di una sola app (solo Windows): il pacchetto application-loopback lancia due piccoli programmi
    (ProcessList.exe e ApplicationLoopback.exe) che leggono l'audio del processo scelto. Se manca, resta
@@ -44,7 +43,8 @@ let pickerDone = null;
 let pickerApps = new Map();
 let pickerPids = new Map();   // id sorgente -> pid del programma che possiede la finestra
 let capturePid = null;
-let shareError = '';      // perché l'ultima condivisione dello schermo non è partita (vuoto = annullata dalla persona)
+let shareError = '';
+let lastShare = null;      // ultima condivisione con audio di sistema: per riprovare senza audio se l'audio non parte      // perché l'ultima condivisione dello schermo non è partita (vuoto = annullata dalla persona)
 
 const cfgFile = () => path.join(app.getPath('userData'), 'config.json');
 function cleanUrl(s) {
@@ -111,17 +111,33 @@ function setupPermissions() {
   ses.setPermissionRequestHandler((wc, perm, cb, details) => cb(OK_PERMS.has(perm) && isOurs(details.requestingUrl || wc.getURL())));
   ses.setPermissionCheckHandler((wc, perm, origin) => OK_PERMS.has(perm) && isOurs(origin));
 
-  // Condivisione schermo: finestra di scelta nostra, e audio del computer (solo Windows).
+  // Condivisione schermo: finestra di scelta nostra, e audio del computer.
   ses.setDisplayMediaRequestHandler(async (request, callback) => {
     shareError = '';
     if (!isOurs(request.frame ? request.frame.url : '')) return callback({});
-    if (IS_WAYLAND) {            // Wayland: sceglie il portale di sistema (una sola finestra di scelta, senza audio)
+    // Seconda richiesta, solo video, subito dopo una con l'audio che non è partito: la pagina riprova senza audio.
+    // Non riapriamo la finestra di scelta: riusiamo lo schermo scelto un attimo fa.
+    const retry = !request.audioRequested && lastShare && Date.now() < lastShare.until ? lastShare : null;
+    lastShare = null;
+    if (retry && retry.video) { console.log('[hstle] riprovo senza audio:', retry.video.id); return callback({ video: retry.video }); }
+    if (IS_WAYLAND) {            // Wayland: l'audio lo scegliamo noi, lo schermo lo sceglie il portale di sistema
+      let audio = 'none';
+      if (!retry) {
+        const choice = await openPicker(true);
+        if (!choice) return callback({});
+        audio = choice.audio;
+      }
       try {
-        // niente anteprime: su Wayland ogni anteprima aprirebbe un flusso PipeWire in più
-        const got = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 0, height: 0 }, fetchWindowIcons: false });
-        console.log('[hstle] Wayland: sorgenti dal portale:', got.map((s) => s.id + ' ' + s.name));
+        // anteprime piccole ma non nulle (come fa Signal): con 0x0 alcune versioni non avviano il flusso PipeWire
+        const got = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 150, height: 150 }, fetchWindowIcons: false });
+        console.log('[hstle] Wayland: sorgenti dal portale:', got.map((s) => s.id + ' ' + s.name), '| audio:', audio);
         if (!got.length) return callback({});     // il portale è stato chiuso senza scegliere
-        return callback({ video: got[0] });
+        const res = { video: got[0] };
+        if (audio === 'system' && request.audioRequested) {
+          res.audio = 'loopback';
+          lastShare = { until: Date.now() + 10000 };   // se l'audio fallisce si ripassa dal portale, senza audio
+        }
+        return callback(res);
       } catch (e) {
         console.warn('condivisione Wayland:', e.message);
         shareError = 'il portale di sistema non ha dato lo schermo (' + e.message + '). Servono PipeWire e xdg-desktop-portal con il backend del tuo desktop (gnome, kde, wlr).';
@@ -138,7 +154,10 @@ function setupPermissions() {
     console.log('[hstle] condivido', video.id, '| audio:', choice.audio);
     const res = { video };
     stopAppCapture();
-    if (choice.audio === 'system' && ['win32', 'linux', 'darwin'].includes(process.platform)) res.audio = 'loopback';   // su Linux e macOS è sperimentale
+    if (choice.audio === 'system' && request.audioRequested) {
+      res.audio = 'loopback';
+      lastShare = { video, until: Date.now() + 10000 };
+    }
     else if (choice.audio === 'app') startAppCapture(choice.pid || pickerPids.get(choice.id), true);   // l'audio arriva alla pagina da un altro percorso
     else if (choice.audio === 'except' && ens) startAppCapture(process.pid, false);                    // tutto l'audio tranne quello di Hstle
     callback(res);
@@ -146,18 +165,19 @@ function setupPermissions() {
 }
 
 /* ---------- scelta di cosa condividere ---------- */
-function openPicker() {
+/** audioOnly: su Wayland si sceglie solo l'audio, lo schermo lo sceglie poi il portale di sistema. */
+function openPicker(audioOnly = false) {
   return new Promise((resolve) => {
     if (picker) { picker.focus(); return resolve(null); }
     let settled = false;
     pickerDone = (v) => { if (!settled) { settled = true; resolve(v); } };
     picker = new BrowserWindow({
-      width: 760, height: 560, parent: win || undefined, modal: !!win, title: 'Cosa vuoi condividere?',
+      width: audioOnly ? 620 : 760, height: audioOnly ? 200 : 560, useContentSize: audioOnly, parent: win || undefined, modal: !!win, title: 'Cosa vuoi condividere?',
       backgroundColor: '#130d20', autoHideMenuBar: true, minimizable: false,
       webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true },
     });
     picker.setMenu(null);
-    picker.loadFile(path.join(__dirname, 'picker.html'));
+    picker.loadFile(path.join(__dirname, 'picker.html'), audioOnly ? { query: { only: 'audio' } } : undefined);
     picker.on('closed', () => { picker = null; if (pickerDone) pickerDone(null); pickerDone = null; });
   });
 }

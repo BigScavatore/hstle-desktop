@@ -42,8 +42,12 @@ const linuxAudio = process.platform === 'linux' ? require('./linux-audio') : nul
 const ownPids = () => [process.pid, ...app.getAppMetrics().map((m) => m.pid)];
 /** Su Linux prepara l'audio da condividere senza Hstle; se non ci riesce, niente audio (meglio che far sentire la chiamata). */
 async function linuxSystemAudio() {
-  try { await linuxAudio.start(ownPids); return true; }
+  try { await linuxAudio.start(ownPids); }
   catch (e) { console.warn('[hstle] audio Linux non disponibile:', e.message); return false; }
+  // di preferenza registriamo noi l'uscita da condividere e la passiamo alla pagina (come l'audio di un'app);
+  // se parec manca, resta il loopback di Chromium, che cattura l'uscita predefinita (che ora è quella da condividere)
+  if (linuxAudio.canRecord() && linuxAudio.startCapture((b) => sendAudio(b))) { capturePid = 'linux'; captureVia = 'parec'; return 'own'; }
+  return 'loopback';
 }
 
 const DEFAULT_URL = 'https://giuseppefausto.ddns.net:8444';
@@ -143,7 +147,9 @@ function setupPermissions() {
         console.log('[hstle] Wayland: sorgenti dal portale:', got.map((s) => s.id + ' ' + s.name), '| audio:', audio);
         if (!got.length) return callback({});     // il portale è stato chiuso senza scegliere
         const res = { video: got[0] };
-        if (audio === 'system' && request.audioRequested && await linuxSystemAudio()) {
+        stopAppCapture();
+        const how = audio === 'system' && request.audioRequested ? await linuxSystemAudio() : false;
+        if (how === 'loopback') {
           res.audio = 'loopback';
           lastShare = { until: Date.now() + 10000 };   // se l'audio fallisce si ripassa dal portale, senza audio
         }
@@ -164,7 +170,8 @@ function setupPermissions() {
     console.log('[hstle] condivido', video.id, '| audio:', choice.audio);
     const res = { video };
     stopAppCapture();
-    if (choice.audio === 'system' && request.audioRequested && (!linuxAudio || await linuxSystemAudio())) {
+    const how = choice.audio === 'system' && request.audioRequested ? (linuxAudio ? await linuxSystemAudio() : 'loopback') : false;
+    if (how === 'loopback') {
       res.audio = 'loopback';
       lastShare = { video, until: Date.now() + 10000 };
     }
@@ -287,7 +294,7 @@ function startAppCapture(pid, include = true) {
   return false;
 }
 function stopAppCapture() {
-  if (capturePid) {
+  if (capturePid && captureVia !== 'parec') {
     try { if (captureVia === 'ens' && ens) ens.stopCapture(); else if (loopback) loopback.stopAudioCapture(capturePid); } catch {}
   }
   capturePid = null; captureVia = null;

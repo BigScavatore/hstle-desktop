@@ -5,10 +5,13 @@
 //   2. la rendiamo l'uscita predefinita: Chromium cattura lei, e i programmi nuovi suonano lì;
 //   3. spostiamo lì gli altri programmi, mentre l'audio di Hstle resta sulle casse vere e quindi non viene catturato.
 // Funziona con PulseAudio e con PipeWire (pipewire-pulse): serve il comando `pactl`.
-const { execFile, execFileSync } = require('child_process');
+const { execFile, execFileSync, spawn } = require('child_process');
+const path = require('path');
 
 const SINK = 'hstle_share';
 let state = null;   // { real, loopMod, nullMod, timer, ownPids }
+let rec = null;     // il processo parec che registra l'uscita da condividere
+const OWN_BIN = path.basename(process.execPath);   // "hstle" nell'app pacchettizzata, "electron" con npm start
 
 function pactl(args) {
   return new Promise((resolve, reject) => execFile('pactl', args, { timeout: 4000 }, (e, out) => (e ? reject(e) : resolve(String(out)))));
@@ -43,7 +46,9 @@ async function sinkInputs() {
     const sink = /^\s*Sink:\s*(\d+)/m.exec(block);
     const owner = /^\s*Owner Module:\s*(\S+)/m.exec(block);
     const pid = /application\.process\.id = "(\d+)"/.exec(block);
-    if (id && sink) list.push({ id: id[1], sink: sink[1], owner: owner ? owner[1] : '', pid: pid ? pid[1] : '' });
+    const bin = /application\.process\.binary = "([^"]*)"/.exec(block);
+    const name = /application\.name = "([^"]*)"/.exec(block);
+    if (id && sink) list.push({ id: id[1], sink: sink[1], owner: owner ? owner[1] : '', pid: pid ? pid[1] : '', bin: bin ? bin[1] : '', name: name ? name[1] : '' });
   }
   return list;
 }
@@ -66,9 +71,11 @@ async function sync() {
   if (!realIdx || !shareIdx) return;
   for (const si of await sinkInputs()) {
     if (si.owner === st.loopMod) continue;                   // il rimando alle casse
-    const mine = si.pid && own.has(si.pid);
-    if (mine && si.sink !== realIdx) await pactl(['move-sink-input', si.id, st.real]).catch(() => {});
-    else if (!mine && si.sink === realIdx) await pactl(['move-sink-input', si.id, SINK]).catch(() => {});
+    // è di Hstle se viene da un nostro processo, o dal nostro eseguibile (i pid possono non coincidere, es. in una sandbox)
+    const mine = (si.pid && own.has(si.pid)) || (si.bin && si.bin === OWN_BIN);
+    const who = (si.name || '?') + ' [' + (si.bin || '?') + ' pid ' + (si.pid || '?') + ']';
+    if (mine && si.sink !== realIdx) { console.log('[hstle] audio Linux: Hstle', who, '-> casse (non condiviso)'); await pactl(['move-sink-input', si.id, st.real]).catch((e) => console.warn('[hstle] spostamento fallito:', e.message)); }
+    else if (!mine && si.sink === realIdx) { console.log('[hstle] audio Linux:', who, '-> condiviso'); await pactl(['move-sink-input', si.id, SINK]).catch((e) => console.warn('[hstle] spostamento fallito:', e.message)); }
   }
 }
 
@@ -90,8 +97,29 @@ async function start(ownPids) {
   console.log('[hstle] audio Linux: catturo tutto tranne Hstle (uscita vera:', real + ')');
 }
 
+/** Registra l'uscita da condividere e passa l'audio (16 bit, stereo, 48 kHz) a onData.
+    Così non dipendiamo da quale uscita sceglie Chromium per il suo "loopback". */
+function startCapture(onData) {
+  stopCapture();
+  if (!state) return false;
+  try {
+    const p = spawn('parec', ['-d', SINK + '.monitor', '--format=s16le', '--rate=48000', '--channels=2', '--latency-msec=20', '--raw',
+      '--client-name=Hstle-cattura', '--stream-name=condivisione'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    p.stdout.on('data', (b) => { try { onData(b); } catch {} });
+    p.stderr.on('data', (b) => console.warn('[hstle] parec:', String(b).trim()));
+    p.on('error', (e) => { console.warn('[hstle] parec non disponibile:', e.message); if (rec === p) rec = null; });
+    p.on('exit', (c) => { if (rec === p) rec = null; if (c) console.warn('[hstle] parec uscito con codice', c); });
+    rec = p;
+    console.log('[hstle] audio Linux: registro', SINK + '.monitor');
+    return true;
+  } catch (e) { console.warn('[hstle] parec:', e.message); return false; }
+}
+function stopCapture() { if (rec) { try { rec.kill(); } catch {} rec = null; } }
+function canRecord() { try { execFileSync('parec', ['--version'], { timeout: 2000, stdio: 'ignore' }); return true; } catch { return false; } }
+
 /** Rimette tutto com'era. Sincrona, così funziona anche alla chiusura dell'app. */
 function stop() {
+  stopCapture();
   const st = state;
   if (!st) return;
   state = null;
@@ -110,4 +138,4 @@ function stop() {
   console.log('[hstle] audio Linux: uscite ripristinate');
 }
 
-module.exports = { available, start, stop, cleanupLeftovers, active: () => !!state };
+module.exports = { available, start, stop, cleanupLeftovers, startCapture, canRecord, active: () => !!state };

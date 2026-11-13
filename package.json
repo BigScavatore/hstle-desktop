@@ -1,6 +1,6 @@
 {
   "name": "hstle-desktop",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "description": "Hstle desktop: il client web in una finestra, con condivisione di schermo e audio di sistema",
   "main": "main.js",
   "private": true,
